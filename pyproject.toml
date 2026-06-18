@@ -33,6 +33,9 @@ typed = ["mypy>=1.19.1", "types-requests>=2.32.4.20260107"]
 target-version = "py311"
 include = ["pyproject.toml", "src/**/*.py", "tests/**/*.py", "docs/**/*"]
 
+[tool.ruff.format]
+exclude = ["*.md", "docs/**/*.md"]
+
 [tool.ruff.lint]
 select = [
     "E",   # pycodestyle
