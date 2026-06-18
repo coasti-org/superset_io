@@ -19,6 +19,68 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 uv tool install git+https://github.com/linkFISH-Consulting/coasti_superset_io
 ```
 
+To avoid entering your credentials on every import or export, you can set them as environment variables. Passwords are best placed into files so they dont appear in the history: Create a file `~/path/to/mypass` that only holds the password.
+
+```bash
+# Linux
+export SUPERSET_BASE_URL="https://superset-demo.example.com"
+export SUPERSET_USER="user@example.com"
+export SUPERSET_PASSWORD_FILE="~/path/to/mypass"
+
+# Windows (Powershell)
+$env:SUPERSET_BASE_URL="https://superset-demo.example.com"
+$env:SUPERSET_USER="user@example.com"
+$env:SUPERSET_PASSWORD_FILE="~/path/to/mypass"
+```
+
+```bash
+superset-io --help
+
+superset-io test
+
+superset-io download ~/path/to/save/at
+
+superset-io explore ~/path/to/save/at list
+superset-io explore ~/path/to/save/at graph
+```
+
+## Superset Frontend Development Workflow
+
+The aim of this tool is a _code-first_ approach to Frontend development.
+Therefore, the ground truth is not what you see in superset, but what lives as yaml files in the Frontend Folder in the source control, e.g. Github.
+
+This allows automatic and versioned rollouts:
+
+```mermaid
+flowchart LR
+
+    subgraph Lokal
+        LocalServer["Superset Dev Server"]
+        LocalFolder["Frontend Ordner"]
+    end
+
+    subgraph Github
+        Repo["Repo"]
+    end
+
+    subgraph Demo Server
+        DemoServer["Superset Demo Server"]
+        DemoFolder["Frontend Ordner"]
+    end
+
+
+    LocalFolder --> |Commit<br>Pull Request| Repo
+    Repo --> |Clone<br>Pull| LocalFolder
+
+    LocalServer --> |superset-io:<br>download| LocalFolder
+    LocalFolder --> |upload| LocalServer
+
+
+    DemoFolder --> |superset-io:<br>upload| DemoServer
+    Repo --> |"download<br>(nächtlich)"| DemoFolder
+```
+
+
 ## Contribution
 
 1. Install the required dependencies (including dev, test dependencies and all optional dependencies)

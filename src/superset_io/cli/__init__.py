@@ -49,8 +49,7 @@ def main(
         str | None,
         typer.Option(
             help="Password for Superset user",
-            envvar="SUPERSET_PASSWORD_FILE",
-            hide_input=True,
+            envvar="SUPERSET_PASSWORD",
         ),
     ] = None,
     access_token: Annotated[
@@ -104,7 +103,10 @@ def authenticate(
     log.info(f"Connecting to Superset at: {base_url}")
 
     if access_token is None:
-        if password_file := os.environ.get("SUPERSET_PASSWORD_FILE", ""):
+        if (
+            password is None
+            and (password_file := os.environ.get("SUPERSET_PASSWORD_FILE")) is not None
+        ):
             password = Path(password_file).read_text().rstrip()
 
         user: str = username or typer.prompt("Username", type=str)
