@@ -12,7 +12,7 @@ TLDR:
 
 We keep track of the superset version (first part) and our wrapping for coasti (second part, pre-release notation)
 
-## Upcoming
+## 0.1.1
 
 - Initial Release
 
