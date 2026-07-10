@@ -6,15 +6,6 @@ import typer
 from rich.console import Console
 from rich.text import Text
 
-from superset_io.api import SupersetApiClient
-
-
-class Context(typer.Context):
-    """Typed typer context for global state management"""
-
-    obj: SupersetApiClient
-
-
 E = TypeVar("E", bound=Exception, covariant=True)
 
 

@@ -15,13 +15,13 @@ explore_app = typer.Typer(
 )
 
 
-class Context(typer.Context):
+class AssetParserContext(typer.Context):
     obj: AssetsParser
 
 
 @explore_app.callback()
 def load_assets(
-    ctx: Context,
+    ctx: AssetParserContext,
     src_path: Annotated[
         Path,
         typer.Argument(
@@ -32,14 +32,13 @@ def load_assets(
         ),
     ],
 ):
-    parser = AssetsParser(src_path)
-    ctx.obj = parser
-    parser.parse()
+    ctx.obj = AssetsParser(src_path)
+    ctx.obj.parse()
 
 
 @explore_app.command(name="list")
 def list_(
-    ctx: Context,
+    ctx: AssetParserContext,
     uuids: Annotated[bool, typer.Option(help="Whether to show UUIDs.")] = True,
 ):
     """List assets from a downloaded assets folder or zip."""
@@ -61,7 +60,7 @@ def list_(
 
 @explore_app.command()
 def graph(
-    ctx: Context,
+    ctx: AssetParserContext,
     asset: Annotated[
         str | None,
         typer.Option(help="UUID of asset. If not given, will be prompted."),
