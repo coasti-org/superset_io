@@ -12,6 +12,12 @@ TLDR:
 
 We keep track of the superset version (first part) and our wrapping for coasti (second part, pre-release notation)
 
+## 0.1.2 - 2026-07-14
+
+### Fixed
+
+- Context object is now typed and works when called through coasti (#14)
+
 ## 0.1.1
 
 - Initial Release
