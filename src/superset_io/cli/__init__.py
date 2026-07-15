@@ -13,7 +13,7 @@ from superset_io.utils import get_version
 
 from .copy import copy_app
 from .explore import explore_app
-from .utils import Context, catch_exception
+from .utils import catch_exception
 
 # Load env vars also from .env
 load_dotenv()
@@ -28,9 +28,13 @@ app.add_typer(explore_app, name="explore")
 app.add_typer(copy_app)
 
 
+class ApiClientContext(typer.Context):
+    obj: SupersetApiClient
+
+
 @app.callback()
 def main(
-    ctx: Context,
+    ctx: typer.Context,
     base_url: Annotated[
         str,
         typer.Option(
@@ -60,7 +64,7 @@ def main(
             envvar="SUPERSET_ACCESS_TOKEN",
         ),
     ] = None,
-):
+) -> None:
     r"""
     Superset-IO
 
@@ -69,10 +73,12 @@ def main(
 
     © coasti
     """
+
+    # these subcommands do not need online access, and no authentication
     if ctx.invoked_subcommand in ["explore", "version", "copy"]:
         return
 
-    if not ctx.obj:
+    if not isinstance(ctx.obj, ApiClientContext):
         ctx.obj = authenticate(
             base_url,
             username,
@@ -139,15 +145,16 @@ def version():
     exit_code=1,
 )
 def test(
-    ctx: Context,
+    ctx: ApiClientContext,
 ):
     """Test the connection to configured superset instance."""
+
     ctx.obj.test_connection()
 
 
 @app.command()
 def download(
-    ctx: Context,
+    ctx: ApiClientContext,
     dst_path: Annotated[
         Path,
         typer.Argument(
@@ -175,7 +182,7 @@ def download(
 
 @app.command()
 def upload(
-    ctx: Context,
+    ctx: ApiClientContext,
     src_path: Annotated[
         Path,
         typer.Argument(
