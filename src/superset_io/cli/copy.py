@@ -10,9 +10,8 @@ from ruamel.yaml import YAML, YAMLError
 from superset_io.api.assets import select_assets
 from superset_io.dependency_graph import AssetsParser
 from superset_io.dependency_graph.assets import AssetData
-from superset_io.dependency_graph.repr import (
-    make_console,
-)
+from superset_io.dependency_graph.repr import make_console
+from superset_io.utils import sanitize_assets_bundle
 
 log = logging.getLogger("superset_io")
 
@@ -67,6 +66,13 @@ def copy(
         bool,
         typer.Option("--yes", "-y", help="Skip confirmation prompt"),
     ] = False,
+    sanitize: Annotated[
+        bool,
+        typer.Option(
+            "--sanitize",
+            help="Sanitize copied assets (consistent filenames, smaller YAML).",
+        ),
+    ] = False,
 ):
     """Copy assets from source folder to target folder."""
 
@@ -105,10 +111,16 @@ def copy(
         [registry[asset] for asset in selected_assets],
         src_path,
         dst_path,
+        sanitize=sanitize,
     )
 
 
-def _copy(assets: list[AssetData], source: Path, target: Path) -> None:
+def _copy(
+    assets: list[AssetData],
+    source: Path,
+    target: Path,
+    sanitize: bool = False,
+) -> None:
     """Execute the copy operation to the target folder."""
     console = make_console()
     console.print(f"[bold]Copying {len(assets)} assets ...")
@@ -130,6 +142,9 @@ def _copy(assets: list[AssetData], source: Path, target: Path) -> None:
         # Copy the file
         shutil.copy2(asset.file_path, dest_path)
         log.debug(f"Copied {asset.name} to {dest_path}")
+
+    if sanitize:
+        sanitize_assets_bundle(target)
 
     console.print("[bold]Copied successfully!")
 

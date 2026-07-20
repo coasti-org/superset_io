@@ -170,6 +170,13 @@ def download(
             help="Destination zip or directory.",
         ),
     ],
+    sanitize: Annotated[
+        bool,
+        typer.Option(
+            "--sanitize",
+            help="Sanitize downloaded assets (consistent filenames, smaller YAML).",
+        ),
+    ] = False,
 ):
     """Download all assets from server to zip or yaml directory."""
 
@@ -184,7 +191,7 @@ def download(
             log.info("Exiting")
             raise typer.Exit(code=1)
 
-    ctx.obj.assets.download(dst_path)
+    ctx.obj.assets.download(dst_path, sanitize=sanitize)
 
 
 @app.command()

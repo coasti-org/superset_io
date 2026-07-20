@@ -3,6 +3,9 @@ import logging
 import zipfile
 from pathlib import Path
 
+from ruamel.yaml import YAML, YAMLError
+from ruamel.yaml.comments import CommentedMap
+
 log = logging.getLogger("superset_io")
 
 
@@ -109,3 +112,81 @@ def validate_assets_bundle_structure(zip_buffer: io.BytesIO | bytes | Path) -> N
     except ValueError:
         log.debug("Invalid ZIP contents:\n" + "  \n".join(names))
         raise
+
+
+def sanitize_assets_bundle(folder: Path):
+    """Sanitize a folder of assets, so export-import cycles are idempotent."""
+
+    folder = Path(folder)
+    if not folder.exists() or not folder.is_dir():
+        raise ValueError(f"Not a folder: {folder}")
+
+    allowed_subfolders = {"charts", "dashboards", "datasets", "databases"}
+
+    for file in folder.rglob("*"):
+        if not file.is_file():
+            continue
+
+        rel_path = file.relative_to(folder)
+        if rel_path.parts and rel_path.parts[0] in allowed_subfolders:
+            _sanitize_asset_file(file=file, kind=rel_path.parts[0])
+        else:
+            log.debug(f"Skipping sanitization for {str(file)}")
+
+
+def _sanitize_asset_file(file: Path, kind: str) -> None:
+    """
+    Sanitize a single asset file (yaml).
+
+    Renames the file to use its UUID as the filename and strips out some
+    unnecessary data.
+
+    Works around a few limitations of the yaml files we get from the superset api:
+    - yaml files are named like the asset, and contain an index, which changes often.
+      Not ideal for git, so we use a file name that changes less (uuid)
+    - yamls contain (cached?) query strings.
+      These are not needed for re-upload and bloat the yaml.
+
+    If the YAML has no ``uuid`` field (e.g. a non-asset config file), the file
+    is left untouched.
+    """
+
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    try:
+        _content = yaml.load(file.read_text(encoding="utf-8"))
+        if not isinstance(_content, CommentedMap):
+            log.debug(f"Skipping non-dict YAML at {file}")
+            return
+        content: CommentedMap = _content
+    except YAMLError as e:
+        raise ValueError(f"Failed to parse yaml: {e}") from e
+
+    if kind == "charts":
+        _sanitize_chart_content(content)
+
+    uuid = content.get("uuid")
+    if uuid is None:
+        output_path = file
+        log.debug(f"No UUID in {file}; writing sanitized content in place")
+    else:
+        new_name = str(uuid).lower() + ".yaml"
+        output_path = file.parent / new_name
+
+    # Always (re-) write using ruamel to get stable YAML formatting.
+    out = io.StringIO()
+    yaml.dump(content, out)
+    output_path.write_text(out.getvalue(), encoding="utf-8")
+
+    if output_path != file:
+        file.unlink(missing_ok=True)
+        log.debug(f"Renamed {file.name} -> {output_path.name}")
+
+
+def _sanitize_chart_content(content: CommentedMap) -> None:
+    """
+    Sanitize yaml content for charts.
+
+    Modifes the CommentedMap in-place.
+    """
+    content.pop("query_context", None)

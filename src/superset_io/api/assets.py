@@ -8,6 +8,7 @@ from pathlib import Path
 
 from superset_io.dependency_graph import Asset, AssetsParser, DependencyGraph
 from superset_io.utils import (
+    sanitize_assets_bundle,
     validate_assets_bundle_structure,
     zipfile_buffer_from_folder,
 )
@@ -213,7 +214,7 @@ class AssetsApiClient(ClientBase):
             overwrite=overwrite,
         )
 
-    def download(self, dst_path: Path):
+    def download(self, dst_path: Path, sanitize: bool = False):
         """Download and export all assets to disk.
 
         Depending an provided dst_path, we either write as zip file or the extracted
@@ -232,28 +233,35 @@ class AssetsApiClient(ClientBase):
         res = self._export()
         # if the zip gets big we might need to consider streaming
         zip_bytes = res.content
-        zip_file = zipfile.ZipFile(io.BytesIO(zip_bytes), "r")
 
-        if kind == "zip":
-            dst_path.parent.mkdir(parents=True, exist_ok=True)
-            with dst_path.open("wb") as f:
-                f.write(zip_bytes)
-        else:
-            # Extract to temp dir, get the assets and move to dst_path
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmp_path = Path(tmpdir)
-                zip_file.extractall(tmp_path)
+        with tempfile.TemporaryDirectory() as _tmpdir:
+            # we always unpack, because we want to sanitize
+            tmpdir = Path(_tmpdir)
+            with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zip_file:
+                zip_file.extractall(tmpdir)
 
-                src_folders = [
-                    f for f in tmp_path.iterdir() if f.name.startswith("assets_export")
-                ]
-                if len(src_folders) != 1:
-                    raise ValueError(
-                        "Did not find a single `assets_export` folder in zip. "
-                        "This should not happen."
-                    )
+            # get the base folder containing the assets
+            _folders = [
+                f
+                for f in tmpdir.iterdir()
+                if f.is_dir() and f.name.startswith("assets_export")
+            ]
+            if len(_folders) != 1:
+                raise ValueError(
+                    "Did not find a unique `assets_export` folder in downloaded zip. "
+                    "This should not happen."
+                )
+            assets_folder = _folders[0]
 
-                for item in src_folders[0].iterdir():
+            if sanitize:
+                sanitize_assets_bundle(assets_folder)
+
+            if kind == "zip":
+                dst_path.parent.mkdir(parents=True, exist_ok=True)
+                zip_buffer = zipfile_buffer_from_folder(assets_folder)
+                dst_path.write_bytes(zip_buffer.getvalue())
+            else:
+                for item in assets_folder.iterdir():
                     shutil.move(item, dst_path / item.name)
 
 
