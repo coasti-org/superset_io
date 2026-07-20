@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -36,19 +37,19 @@ class ApiClientContext(typer.Context):
 def main(
     ctx: typer.Context,
     base_url: Annotated[
-        str,
+        str | None,
         typer.Option(
             help="Base URL for Superset instance",
             envvar="SUPERSET_BASE_URL",
         ),
-    ] = "http://localhost:8088",
+    ] = None,
     username: Annotated[
-        str,
+        str | None,
         typer.Option(
             help="Username for Superset user",
             envvar="SUPERSET_USER",
         ),
-    ] = "admin",
+    ] = None,
     password: Annotated[
         str | None,
         typer.Option(
@@ -78,6 +79,10 @@ def main(
     if ctx.invoked_subcommand in ["explore", "version", "copy"]:
         return
 
+    # help output should not trigger a login attempt
+    if "--help" in sys.argv[1:]:
+        return
+
     if not isinstance(ctx.obj, ApiClientContext):
         ctx.obj = authenticate(
             base_url,
@@ -92,7 +97,7 @@ def main(
     exit_code=1,
 )
 def authenticate(
-    base_url: str,
+    base_url: str | None = None,
     username: str | None = None,
     password: str | None = None,
     access_token: str | None = None,
@@ -106,7 +111,10 @@ def authenticate(
     https://stackoverflow.com/questions/68646596/how-to-get-superset-token-for-use-rest-api
     """
 
-    log.info(f"Connecting to Superset at: {base_url}")
+    if base_url is None:
+        base_url = str(typer.prompt("URL", type=str, default="http://localhost:8088"))
+    else:
+        log.info(f"Connecting to Superset at: {base_url}")
 
     if access_token is None:
         if (
@@ -115,11 +123,10 @@ def authenticate(
         ):
             password = Path(password_file).read_text().rstrip()
 
-        user: str = username or typer.prompt("Username", type=str)
-        log.info(f"Connecting to Superset as: {user}")
         session = SupersetApiSession.from_credentials(
             base_url=base_url,
-            username=user,
+            username=username
+            or typer.prompt("Username", type=str, hide_input=False, default="admin"),
             password=password
             or typer.prompt("Password", type=str, hide_input=True, default="admin"),
         )
@@ -210,11 +217,26 @@ def upload(
         bool,
         typer.Option(
             help="Whether to include dependencies of selected assets. "
-            "Only applies if --select is used. Skipped assets will be removed after",
+            "Only applies if --select is used. Assets given --skip are removed at the "
+            "very end (after resolving dependencies).",
         ),
     ] = True,
+    force: Annotated[
+        bool,
+        typer.Option(
+            help="Skip confirmation before overwriting remote assets.",
+        ),
+    ] = False,
 ):
     """Upload all assets from zip or yaml directory to server."""
+
+    if not force and not typer.confirm(
+        f"This will overwrite content on {ctx.obj.session.base_url} and "
+        "CANNOT BE UNDONE.\nProceed?",
+        default=False,
+    ):
+        log.info("Exiting")
+        raise typer.Exit(code=1)
 
     ctx.obj.assets.upload(
         src_path,
