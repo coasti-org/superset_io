@@ -1,6 +1,7 @@
 import io
 import logging
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from ruamel.yaml import YAML, YAMLError
@@ -122,6 +123,7 @@ def sanitize_assets_bundle(folder: Path):
         raise ValueError(f"Not a folder: {folder}")
 
     allowed_subfolders = {"charts", "dashboards", "datasets", "databases"}
+    tasks: list[tuple[Path, str]] = []
 
     for file in folder.rglob("*"):
         if not file.is_file():
@@ -129,9 +131,20 @@ def sanitize_assets_bundle(folder: Path):
 
         rel_path = file.relative_to(folder)
         if rel_path.parts and rel_path.parts[0] in allowed_subfolders:
-            _sanitize_asset_file(file=file, kind=rel_path.parts[0])
+            tasks.append((file, rel_path.parts[0]))
         else:
             log.debug(f"Skipping sanitization for {str(file)}")
+
+    with ThreadPoolExecutor() as executor:
+        futures = {
+            executor.submit(_sanitize_asset_file, file=file, kind=kind): file
+            for file, kind in tasks
+        }
+        for f in as_completed(futures):
+            try:
+                f.result()
+            except Exception as e:
+                log.error(f"Failed to process {futures[f]}: {e}")
 
 
 def _sanitize_asset_file(file: Path, kind: str) -> None:
