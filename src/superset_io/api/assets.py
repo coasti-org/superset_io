@@ -230,36 +230,31 @@ class AssetsApiClient(ClientBase):
             raise ValueError(f"Destination directory '{dst_path}' is not empty")
 
         res = self._export()
+
         # if the zip gets big we might need to consider streaming
         zip_bytes = res.content
 
         if kind == "zip":
-            # Preserve the server response byte-for-byte when the caller requests a
-            # ZIP file; unpacking and repacking might change ZIP metadata.
             dst_path.parent.mkdir(parents=True, exist_ok=True)
             dst_path.write_bytes(zip_bytes)
-            return
+        else:
+            # Extract to temp dir, get the assets and move to dst_path
+            with tempfile.TemporaryDirectory() as _tmp_path:
+                tmp_path = Path(_tmp_path)
+                zip_file = zipfile.ZipFile(io.BytesIO(zip_bytes), "r")
+                zip_file.extractall(tmp_path)
 
-        with tempfile.TemporaryDirectory() as _tmpdir:
-            tmpdir = Path(_tmpdir)
-            with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zip_file:
-                zip_file.extractall(tmpdir)
+                src_folders = [
+                    f for f in tmp_path.iterdir() if f.name.startswith("assets_export")
+                ]
+                if len(src_folders) != 1:
+                    raise ValueError(
+                        "Did not find a unique `assets_export` folder in downloaded "
+                        "zip. This should not happen."
+                    )
 
-            # get the base folder containing the assets
-            _folders = [
-                f
-                for f in tmpdir.iterdir()
-                if f.is_dir() and f.name.startswith("assets_export")
-            ]
-            if len(_folders) != 1:
-                raise ValueError(
-                    "Did not find a unique `assets_export` folder in downloaded zip. "
-                    "This should not happen."
-                )
-            assets_folder = _folders[0]
-
-            for item in assets_folder.iterdir():
-                shutil.move(item, dst_path / item.name)
+                for item in src_folders[0].iterdir():
+                    shutil.move(item, dst_path / item.name)
 
 
 def select_assets(
