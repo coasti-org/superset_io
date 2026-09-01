@@ -11,6 +11,7 @@ import pytest
 
 from superset_io.utils import (
     get_version,
+    sanitize_assets_bundle,
     validate_assets_bundle_structure,
     zipfile_buffer_from_folder,
     zipfile_buffer_from_zipfile,
@@ -212,3 +213,175 @@ class TestGetVersion:
         monkeypatch.setattr(metadata, "version", _raise)
 
         assert get_version() == "[not found] Use `uv sync` when developing!"
+
+
+class TestSanitizeAssetsBundle:
+    """Tests for sanitize_assets_bundle and _sanitize_asset_file."""
+
+    def _make_folder(self, tmp_path, files: dict[str, str]):
+        """Helper to create a folder structure from a dict of path->yaml_content."""
+        for rel_path, content in files.items():
+            target = tmp_path / rel_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        return tmp_path
+
+    def test_renames_file_by_uuid(self, tmp_path):
+        """Asset file with uuid should be renamed to <uuid>.yaml and lower cased."""
+        folder = self._make_folder(
+            tmp_path,
+            {
+                "dashboards/demo.yaml": (
+                    "dashboard_title: Demo\n"
+                    "uuid: A1B2C3D4-5678-4ABC-DEF0-123456789ABC\n"
+                ),
+            },
+        )
+
+        sanitize_assets_bundle(folder)
+
+        old = folder / "dashboards" / "demo.yaml"
+        new = folder / "dashboards" / "a1b2c3d4-5678-4abc-def0-123456789abc.yaml"
+        assert not old.exists()
+        assert new.exists()
+
+    def test_handles_mixed_asset_types(self, tmp_path):
+        """Multiple asset subfolders are all processed."""
+        folder = self._make_folder(
+            tmp_path,
+            {
+                "dashboards/demo.yaml": (
+                    "dashboard_title: Demo\n"
+                    "uuid: 11111111-aaaa-4bbb-cccc-dddddddddddd\n"
+                ),
+                "charts/area.yaml": (
+                    "slice_name: Area\nuuid: 22222222-bbbb-4ccc-dddd-eeeeeeeeeeee\n"
+                ),
+                "databases/sqlite.yaml": (
+                    "database_name: SQLite\n"
+                    "uuid: 33333333-cccc-4ddd-eeee-ffffffffffff\n"
+                ),
+            },
+        )
+
+        sanitize_assets_bundle(folder)
+
+        assert not (folder / "dashboards" / "demo.yaml").exists()
+        assert not (folder / "charts" / "area.yaml").exists()
+        assert not (folder / "databases" / "sqlite.yaml").exists()
+        assert (
+            folder / "dashboards" / "11111111-aaaa-4bbb-cccc-dddddddddddd.yaml"
+        ).exists()
+        assert (
+            folder / "charts" / "22222222-bbbb-4ccc-dddd-eeeeeeeeeeee.yaml"
+        ).exists()
+        assert (
+            folder / "databases" / "33333333-cccc-4ddd-eeee-ffffffffffff.yaml"
+        ).exists()
+
+    def test_charts_remove_query_context(self, tmp_path):
+        """Chart assets should drop query_context during sanitization."""
+        folder = self._make_folder(
+            tmp_path,
+            {
+                "charts/area.yaml": (
+                    "slice_name: Area\n"
+                    "uuid: 44444444-aaaa-4bbb-cccc-111111111111\n"
+                    'query_context: \'{"foo": "bar"}\'\n'
+                ),
+            },
+        )
+
+        sanitize_assets_bundle(folder)
+
+        chart_file = folder / "charts" / "44444444-aaaa-4bbb-cccc-111111111111.yaml"
+        assert chart_file.exists()
+        chart_content = chart_file.read_text(encoding="utf-8")
+        assert "query_context:" not in chart_content
+        assert "slice_name: Area" in chart_content
+        assert "uuid: 44444444-aaaa-4bbb-cccc-111111111111" in chart_content
+
+    def test_leaves_non_asset_subfolders_untouched(self, tmp_path):
+        """Files outside charts/dashboards/datasets/databases are skipped."""
+        folder = self._make_folder(
+            tmp_path,
+            {
+                "metadata.yaml": "version: 1.0\ntype: assets\n",
+                "README.txt": "some notes",
+            },
+        )
+
+        sanitize_assets_bundle(folder)
+
+        assert (folder / "metadata.yaml").exists()
+        assert (folder / "README.txt").exists()
+
+    def test_skips_files_without_uuid(self, tmp_path):
+        """Files without uuid field should be left untouched (not renamed)."""
+        folder = self._make_folder(
+            tmp_path,
+            {
+                "dashboards/no_uuid.yaml": "dashboard_title: No UUID\n",
+            },
+        )
+
+        sanitize_assets_bundle(folder)
+
+        # File stays in place because it has no uuid
+        assert (folder / "dashboards" / "no_uuid.yaml").exists()
+
+    def test_skips_metadata_yaml(self, tmp_path):
+        """metadata.yaml is always skipped regardless of content."""
+        metadata_content = "version: 1.0\ntype: assets\n"
+        dashboard_content = (
+            "dashboard_title: Demo\nuuid: deadbeef-1234-4abc-def0-123456789abc\n"
+        )
+        folder = self._make_folder(
+            tmp_path,
+            {
+                "metadata.yaml": metadata_content,
+                "dashboards/demo.yaml": dashboard_content,
+            },
+        )
+
+        sanitize_assets_bundle(folder)
+
+        renamed_dashboard = (
+            folder / "dashboards" / "deadbeef-1234-4abc-def0-123456789abc.yaml"
+        )
+
+        assert (folder / "metadata.yaml").exists()
+        assert (folder / "metadata.yaml").read_text(
+            encoding="utf-8"
+        ) == metadata_content
+        assert not (folder / "dashboards" / "demo.yaml").exists()
+        assert renamed_dashboard.exists()
+        assert renamed_dashboard.read_text(encoding="utf-8") == dashboard_content
+
+    def test_handles_collision_by_unlinking_existing(self, tmp_path):
+        """If a file with the target UUID name already exists, it gets replaced."""
+        # Pre-create a file with the uuid-based name
+        (tmp_path / "dashboards").mkdir(parents=True)
+        existing = tmp_path / "dashboards" / "deadbeef-1234-4abc-def0-123456789abc.yaml"
+        existing.write_text(
+            "existing: true\nuuid: deadbeef-1234-4abc-def0-123456789abc\n",
+            encoding="utf-8",
+        )
+
+        # Also create the source file that would rename to the same UUID
+        dup_source = tmp_path / "dashboards" / "old_name.yaml"
+        dup_source.write_text(
+            "dashboard_title: Dup\nuuid: deadbeef-1234-4abc-def0-123456789abc\n",
+            encoding="utf-8",
+        )
+
+        sanitize_assets_bundle(tmp_path)
+
+        # Source should be gone, target should exist
+        assert not dup_source.exists()
+        assert existing.exists()
+
+    def test_nonexistent_folder_raises(self):
+        """sanitize_assets_bundle raises ValueError for non-existent folder."""
+        with pytest.raises(ValueError, match="Not a folder"):
+            sanitize_assets_bundle(Path("/nonexistent/path"))

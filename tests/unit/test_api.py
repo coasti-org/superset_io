@@ -236,10 +236,12 @@ class TestDownloadAssets:
     def test_download_assets_writes_zip_file(
         self, tmp_path, client: SupersetApiClient, monkeypatch
     ):
+        metadata_content = "version: 1.0"
+        dashboard_content = "dashboard_title: Demo"
         res_mock = self._zip_response_mock(
             {
-                "assets_export_123/metadata.yaml": "version: 1.0",
-                "assets_export_123/dashboards/demo.yaml": "dashboard_title: Demo",
+                "assets_export_123/metadata.yaml": metadata_content,
+                "assets_export_123/dashboards/demo.yaml": dashboard_content,
             }
         )
         monkeypatch.setattr(client.assets, "_export", Mock(return_value=res_mock))
@@ -248,6 +250,8 @@ class TestDownloadAssets:
         client.assets.download(out_zip)
 
         assert out_zip.exists()
+
+        # Check zip byte-by-byte. This wont work when sanitizing.
         assert out_zip.read_bytes() == res_mock.content
 
     def test_download_assets_extracts_to_folder_and_moves_children(
@@ -291,7 +295,7 @@ class TestDownloadAssets:
 
         out_dir = tmp_path / "out_folder"
         with pytest.raises(
-            ValueError, match="Did not find a single `assets_export` folder"
+            ValueError, match="Did not find a unique `assets_export` folder"
         ):
             client.assets.download(out_dir)
 
@@ -308,6 +312,6 @@ class TestDownloadAssets:
 
         out_dir = tmp_path / "out_folder"
         with pytest.raises(
-            ValueError, match="Did not find a single `assets_export` folder"
+            ValueError, match="Did not find a unique `assets_export` folder"
         ):
             client.assets.download(out_dir)

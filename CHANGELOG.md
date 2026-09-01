@@ -12,6 +12,19 @@ TLDR:
 
 We keep track of the superset version (first part) and our wrapping for coasti (second part, pre-release notation)
 
+
+
+## 0.2.0 - 2026-09-01
+
+### Added
+
+- `copy` and `download` subcommands now have a `--sanitize` option to create yamls that do not change upon re-downloads (#15, #16)
+
+### Fixed
+
+- Authentication no longer required for help messages, and fixed prompt for default credentials.
+- Added confirmation dialog before upload, and a `--force` option to prevent it (#18)
+
 ## 0.1.2 - 2026-07-14
 
 ### Fixed

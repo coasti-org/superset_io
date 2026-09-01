@@ -230,18 +230,18 @@ class AssetsApiClient(ClientBase):
             raise ValueError(f"Destination directory '{dst_path}' is not empty")
 
         res = self._export()
+
         # if the zip gets big we might need to consider streaming
         zip_bytes = res.content
-        zip_file = zipfile.ZipFile(io.BytesIO(zip_bytes), "r")
 
         if kind == "zip":
             dst_path.parent.mkdir(parents=True, exist_ok=True)
-            with dst_path.open("wb") as f:
-                f.write(zip_bytes)
+            dst_path.write_bytes(zip_bytes)
         else:
             # Extract to temp dir, get the assets and move to dst_path
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmp_path = Path(tmpdir)
+            with tempfile.TemporaryDirectory() as _tmp_path:
+                tmp_path = Path(_tmp_path)
+                zip_file = zipfile.ZipFile(io.BytesIO(zip_bytes), "r")
                 zip_file.extractall(tmp_path)
 
                 src_folders = [
@@ -249,8 +249,8 @@ class AssetsApiClient(ClientBase):
                 ]
                 if len(src_folders) != 1:
                     raise ValueError(
-                        "Did not find a single `assets_export` folder in zip. "
-                        "This should not happen."
+                        "Did not find a unique `assets_export` folder in downloaded "
+                        "zip. This should not happen."
                     )
 
                 for item in src_folders[0].iterdir():
