@@ -152,8 +152,10 @@ class AssetsParser:
                 # use it
                 for key, values in chunk.registry.items():
                     existing = asset_registry.get(key, None)
-                    if values.file_path is not None or (
-                        existing and existing.file_path is None
+                    if (
+                        existing is None
+                        or values.file_path is not None
+                        or existing.file_path is None
                     ):
                         asset_registry[key] = values
 
@@ -230,7 +232,13 @@ class AssetsParser:
 
         dependencies = set()
         if theme_uuid := self.__parse_uuid(dashboard.get("theme_uuid")):
-            dependencies.add(Asset(uuid=theme_uuid, type=AssetType.THEME))
+            theme_asset = Asset(uuid=theme_uuid, type=AssetType.THEME)
+            dependencies.add(theme_asset)
+            # As of superset v6.1, themes are referenced in dashboards but not exported
+            # yet. Therefore, register metadata-only placeholder.
+            registry[theme_asset] = AssetData(
+                name="(theme not exported)",
+            )
 
         for position in dashboard.get("position", {}).values():
             if not isinstance(position, dict):

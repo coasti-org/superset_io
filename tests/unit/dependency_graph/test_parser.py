@@ -196,10 +196,12 @@ dataset_uuid: {ds_uuid}
         dashboard_file = dashboards_dir / "dash1.yaml"
         dashboard_uuid = "22222222-3333-4444-5555-666666666666"
         chart_uuid = "11111111-2222-3333-4444-555555555555"
+        theme_uuid = "33333333-4444-5555-6666-777777777777"
         dashboard_file.write_text(
             f"""
 dashboard_title: test_dashboard
 uuid: {dashboard_uuid}
+theme_uuid: {theme_uuid}
 position:
   CHART-1:
     type: CHART
@@ -215,7 +217,7 @@ position:
 
         graph = parser.graph
         assets = graph.assets
-        assert len(assets) == 2
+        assert len(assets) == 3
 
         dashboard_asset = graph.get_asset(UUID(dashboard_uuid))
         assert dashboard_asset is not None
@@ -223,8 +225,14 @@ position:
         chart_asset = graph.get_asset(UUID(chart_uuid))
         assert chart_asset is not None
 
+        theme_asset = graph.get_asset(UUID(theme_uuid))
+        assert theme_asset is not None
+        assert theme_asset.type == AssetType.THEME
+        assert parser.asset_registry[theme_asset].name == "(theme not exported)"
+
         deps = graph.get_dependencies(dashboard_asset)
         assert chart_asset in deps
+        assert theme_asset in deps
 
     def test_parse_charts_folder_with_multiple_files(self, parser, metadata_file):
         """parse() should correctly parse multiple chart files."""
