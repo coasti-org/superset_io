@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Annotated
 
@@ -10,7 +11,11 @@ import typer
 from dotenv import load_dotenv
 
 from superset_io.api import SupersetApiClient, SupersetApiSession
-from superset_io.utils import get_version
+from superset_io.utils import (
+    get_version,
+    sanitize_assets_bundle,
+    zipfile_buffer_from_folder,
+)
 
 from .copy import copy_app
 from .explore import explore_app
@@ -24,6 +29,7 @@ logging.basicConfig(level="INFO")
 app = typer.Typer(
     no_args_is_help=True,
     pretty_exceptions_show_locals=False,
+    add_completion=False,
 )
 app.add_typer(explore_app, name="explore")
 app.add_typer(copy_app)
@@ -190,8 +196,24 @@ def download(
         else:
             log.info("Exiting")
             raise typer.Exit(code=1)
+    if not sanitize:
+        ctx.obj.assets.download(dst_path)
+        return
 
-    ctx.obj.assets.download(dst_path, sanitize=sanitize)
+    # We want to keep sanitization out of the api layer. Do it at cli level.
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        temporary_path = Path(temporary_directory) / "assets_export"
+        ctx.obj.assets.download(temporary_path)
+        sanitize_assets_bundle(temporary_path)
+
+        if dst_path.suffix.lower() == ".zip":
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            zip_buffer = zipfile_buffer_from_folder(temporary_path)
+            dst_path.write_bytes(zip_buffer.getvalue())
+        else:
+            dst_path.mkdir(parents=True, exist_ok=True)
+            for item in temporary_path.iterdir():
+                shutil.move(item, dst_path / item.name)
 
 
 @app.command()

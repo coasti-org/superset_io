@@ -12,8 +12,9 @@ TLDR:
 
 We keep track of the superset version (first part) and our wrapping for coasti (second part, pre-release notation)
 
-## 0.1.3 - Upcoming
 
+
+## 0.2.0 - 2026-09-01
 
 ### Added
 

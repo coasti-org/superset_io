@@ -251,17 +251,8 @@ class TestDownloadAssets:
 
         assert out_zip.exists()
 
-        # we sanitize the zip, so we cannot compare byte by byte. check content instead.
-        with zipfile.ZipFile(out_zip, "r") as zf:
-            assert "assets_export_123/metadata.yaml" in zf.namelist()
-            assert "assets_export_123/dashboards/demo.yaml" in zf.namelist()
-            assert (
-                zf.read("assets_export_123/metadata.yaml").decode() == metadata_content
-            )
-            assert (
-                zf.read("assets_export_123/dashboards/demo.yaml").decode()
-                == dashboard_content
-            )
+        # Check zip byte-by-byte. This wont work when sanitizing.
+        assert out_zip.read_bytes() == res_mock.content
 
     def test_download_assets_extracts_to_folder_and_moves_children(
         self, tmp_path, client: SupersetApiClient, monkeypatch

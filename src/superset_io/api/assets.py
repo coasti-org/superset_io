@@ -8,7 +8,6 @@ from pathlib import Path
 
 from superset_io.dependency_graph import Asset, AssetsParser, DependencyGraph
 from superset_io.utils import (
-    sanitize_assets_bundle,
     validate_assets_bundle_structure,
     zipfile_buffer_from_folder,
 )
@@ -214,7 +213,7 @@ class AssetsApiClient(ClientBase):
             overwrite=overwrite,
         )
 
-    def download(self, dst_path: Path, sanitize: bool = False):
+    def download(self, dst_path: Path):
         """Download and export all assets to disk.
 
         Depending an provided dst_path, we either write as zip file or the extracted
@@ -234,8 +233,14 @@ class AssetsApiClient(ClientBase):
         # if the zip gets big we might need to consider streaming
         zip_bytes = res.content
 
+        if kind == "zip":
+            # Preserve the server response byte-for-byte when the caller requests a
+            # ZIP file; unpacking and repacking might change ZIP metadata.
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            dst_path.write_bytes(zip_bytes)
+            return
+
         with tempfile.TemporaryDirectory() as _tmpdir:
-            # we always unpack, because we want to sanitize
             tmpdir = Path(_tmpdir)
             with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zip_file:
                 zip_file.extractall(tmpdir)
@@ -253,16 +258,8 @@ class AssetsApiClient(ClientBase):
                 )
             assets_folder = _folders[0]
 
-            if sanitize:
-                sanitize_assets_bundle(assets_folder)
-
-            if kind == "zip":
-                dst_path.parent.mkdir(parents=True, exist_ok=True)
-                zip_buffer = zipfile_buffer_from_folder(assets_folder)
-                dst_path.write_bytes(zip_buffer.getvalue())
-            else:
-                for item in assets_folder.iterdir():
-                    shutil.move(item, dst_path / item.name)
+            for item in assets_folder.iterdir():
+                shutil.move(item, dst_path / item.name)
 
 
 def select_assets(
