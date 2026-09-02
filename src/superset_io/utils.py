@@ -195,9 +195,16 @@ def _sanitize_asset_file(file: Path, kind: str, bundle_folder: Path) -> None:
         output_path = output_directory / new_name
 
     # Always (re-) write using ruamel to get stable YAML formatting.
+    # Keep exported assets stable across operating systems so round-trips do not
+    # produce noisy diffs when a file was touched on Windows. We force CRLF -> LF
     out = io.StringIO()
     yaml.dump(content, out)
-    output_path.write_text(out.getvalue(), encoding="utf-8")
+    normalized_content = out.getvalue().replace("\r\n", "\n").replace("\r", "\n")
+    output_path.write_text(
+        normalized_content,
+        encoding="utf-8",
+        newline="\n",
+    )
 
     if output_path != file:
         file.unlink(missing_ok=True)
