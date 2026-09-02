@@ -137,7 +137,12 @@ def sanitize_assets_bundle(folder: Path):
 
     with ThreadPoolExecutor() as executor:
         futures = {
-            executor.submit(_sanitize_asset_file, file=file, kind=kind): file
+            executor.submit(
+                _sanitize_asset_file,
+                file=file,
+                kind=kind,
+                bundle_folder=folder,
+            ): file
             for file, kind in tasks
         }
         for f in as_completed(futures):
@@ -147,7 +152,7 @@ def sanitize_assets_bundle(folder: Path):
                 log.error(f"Failed to process {futures[f]}: {e}")
 
 
-def _sanitize_asset_file(file: Path, kind: str) -> None:
+def _sanitize_asset_file(file: Path, kind: str, bundle_folder: Path) -> None:
     """
     Sanitize a single asset file (yaml).
 
@@ -184,7 +189,10 @@ def _sanitize_asset_file(file: Path, kind: str) -> None:
         log.debug(f"No UUID in {file}; writing sanitized content in place")
     else:
         new_name = str(uuid).lower() + ".yaml"
-        output_path = file.parent / new_name
+        output_directory = (
+            bundle_folder / "datasets" if kind == "datasets" else file.parent
+        )
+        output_path = output_directory / new_name
 
     # Always (re-) write using ruamel to get stable YAML formatting.
     out = io.StringIO()
