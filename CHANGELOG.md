@@ -17,6 +17,7 @@ We keep track of the superset version (first part) and our wrapping for coasti (
 ### Fixed
 
 - `copy` now supports ZIP sources and targets.
+- Sanitization: Datasets are no longer placed in subfolders that carry the name of their database.
 
 ### Changed
 
