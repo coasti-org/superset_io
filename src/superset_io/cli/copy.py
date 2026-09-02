@@ -65,7 +65,7 @@ def copy(
     ] = True,
     yes: Annotated[
         bool,
-        typer.Option("--yes", "-y", help="Skip confirmation prompt"),
+        typer.Option("--yes", "-y", help="Skip confirmation prompt."),
     ] = False,
     sanitize: Annotated[
         bool,
@@ -78,9 +78,7 @@ def copy(
     """Copy assets from source folder to target directory."""
 
     # Confirm if destination directory already exists and is not empty
-    if dst_path.exists() and (
-        not dst_path.is_dir() or any(dst_path.iterdir())
-    ):
+    if dst_path.exists() and (not dst_path.is_dir() or any(dst_path.iterdir())):
         if not yes and not typer.prompt(
             f"Destination directory '{dst_path}' is not empty. Overwrite?",
             type=bool,
@@ -134,9 +132,7 @@ def _copy(
             tmp_dir = Path(_tmp_dir) / "assets_export"
             _copy(assets, source, tmp_dir, sanitize=sanitize)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(
-                zipfile_buffer_from_folder(tmp_dir).getvalue()
-            )
+            target.write_bytes(zipfile_buffer_from_folder(tmp_dir).getvalue())
         return
 
     console = make_console()

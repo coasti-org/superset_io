@@ -202,9 +202,8 @@ def download(
 ):
     """Download all assets from server to zip or yaml directory."""
 
-    target_has_content = (
-        (dst_path.is_dir() and any(dst_path.iterdir()))
-        or (dst_path.is_file() and dst_path.suffix.lower() == ".zip")
+    target_has_content = (dst_path.is_dir() and any(dst_path.iterdir())) or (
+        dst_path.is_file() and dst_path.suffix.lower() == ".zip"
     )
     if target_has_content:
         if typer.prompt(
@@ -225,11 +224,11 @@ def download(
         ctx.obj.assets.download(dst_path)
         return
 
-    with tempfile.TemporaryDirectory() as temporary_directory:
-        temporary_path = Path(temporary_directory) / "assets_export"
-        ctx.obj.assets.download(temporary_path)
+    with tempfile.TemporaryDirectory() as _tmp_dir:
+        tmp_dir = Path(_tmp_dir) / "assets_export"
+        ctx.obj.assets.download(tmp_dir)
         copy(
-            temporary_path,
+            tmp_dir,
             dst_path,
             select=select,
             skip=skip,
@@ -250,18 +249,18 @@ def upload(
             help="Source zip or directory.",
         ),
     ],
-    skip: Annotated[
-        list[str] | None,
-        typer.Option(
-            help="Specify UUIDs of assets exclude from upload. Can be combined with "
-            "--select and gets applied after selection and dependency resolution.",
-        ),
-    ] = None,
     select: Annotated[
         list[str] | None,
         typer.Option(
             help="Specify UUIDs of assets to upload. If not given, "
             "all assets will be uploaded. Can be given multiple times.",
+        ),
+    ] = None,
+    skip: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="Specify UUIDs of assets exclude from upload. Can be combined with "
+            "--select and gets applied after selection and dependency resolution.",
         ),
     ] = None,
     include_dependencies: Annotated[
@@ -272,16 +271,14 @@ def upload(
             "very end (after resolving dependencies).",
         ),
     ] = True,
-    force: Annotated[
+    yes: Annotated[
         bool,
-        typer.Option(
-            help="Skip confirmation before overwriting remote assets.",
-        ),
+        typer.Option("--yes", "-y", help="Skip confirmation prompt."),
     ] = False,
 ):
     """Upload all assets from zip or yaml directory to server."""
 
-    if not force and not typer.confirm(
+    if not yes and not typer.confirm(
         f"This will overwrite content on {ctx.obj.session.base_url} and "
         "CANNOT BE UNDONE.\nProceed?",
         default=False,
@@ -289,9 +286,21 @@ def upload(
         log.info("Exiting")
         raise typer.Exit(code=1)
 
-    ctx.obj.assets.upload(
-        src_path,
-        selected=select,
-        skip=skip,
-        include_dependencies=include_dependencies,
-    )
+    needs_modification = select is not None or skip is not None
+    if not needs_modification:
+        ctx.obj.assets.upload(src_path)
+        return
+
+    with tempfile.TemporaryDirectory() as _tmp_dir:
+        tmp_dir = Path(_tmp_dir) / "assets_export"
+        copy(
+            src_path,
+            tmp_dir,
+            select=select,
+            skip=skip,
+            include_dependencies=include_dependencies,
+        )
+        ctx.obj.assets.upload(
+            tmp_dir,
+            sparse=needs_modification,
+        )
