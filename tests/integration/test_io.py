@@ -5,9 +5,36 @@ Integration tests for dashboard export and import functionality.
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from superset_io.api import SupersetApiClient
+from superset_io.cli import app
 from superset_io.dependency_graph import AssetsParser
+
+from .superset_instance import SupersetInstance
+
+
+def _upload_with_cli(
+    superset_instance: SupersetInstance,
+    source_path: Path,
+    *options: str,
+) -> None:
+    result = CliRunner().invoke(
+        app,
+        [
+            "--base-url",
+            superset_instance.url,
+            "--username",
+            superset_instance.user,
+            "--password",
+            superset_instance.password,
+            "upload",
+            str(source_path),
+            "--yes",
+            *options,
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
 
 
 @pytest.mark.integration
@@ -63,14 +90,17 @@ class TestApiClient:
 
         assert assets_dl.graph == assets_original.graph
 
-    def test_upload_select(self, superset_client: SupersetApiClient):
+    def test_upload_select(
+        self, superset_client: SupersetApiClient, superset_instance
+    ):
         """Test upload of valid assets."""
 
         # Upload folder with select
-        superset_client.assets.upload(
+        _upload_with_cli(
+            superset_instance,
             Path(__file__).parent.parent / "assets" / "sample_assets",
-            selected=["00000000-0000-0000-0000-da54b0aad000"],
-            include_dependencies=True,
+            "--select",
+            "00000000-0000-0000-0000-da54b0aad000",
         )
 
         # Should include selected dashboard and its dependencies
@@ -91,14 +121,18 @@ class TestApiClient:
         uuids: map[str] = map(lambda x: x["uuid"], databases["result"])
         assert "00000000-da7a-ba5e-0000-000000000000" in uuids
 
-    def test_upload_select_no_dependencies(self, superset_client: SupersetApiClient):
+    def test_upload_select_no_dependencies(
+        self, superset_client: SupersetApiClient, superset_instance
+    ):
         """Test upload of valid assets."""
 
         # Upload folder with select but no dependencies
-        superset_client.assets.upload(
+        _upload_with_cli(
+            superset_instance,
             Path(__file__).parent.parent / "assets" / "sample_assets",
-            selected=["00000000-0000-0000-0000-da54b0aad000"],
-            include_dependencies=False,
+            "--select",
+            "00000000-0000-0000-0000-da54b0aad000",
+            "--no-include-dependencies",
         )
 
         # Should include selected dashboard but not its dependencies
@@ -161,14 +195,25 @@ class TestApiClient:
             },
         ],
     )
-    def test_upload_skip(self, superset_client: SupersetApiClient, test_case):
+    def test_upload_skip(
+        self, superset_client: SupersetApiClient, superset_instance, test_case
+    ):
         """Test upload with skip parameter."""
         # Upload with specified selection and skip
-        superset_client.assets.upload(
+        options = [
+            option
+            for asset_uuid in test_case["selected"] or []
+            for option in ("--select", asset_uuid)
+        ]
+        options.extend(
+            option
+            for asset_uuid in test_case["skip"]
+            for option in ("--skip", asset_uuid)
+        )
+        _upload_with_cli(
+            superset_instance,
             Path(__file__).parent.parent / "assets" / "sample_assets",
-            selected=test_case["selected"],
-            skip=test_case["skip"],
-            include_dependencies=True,
+            *options,
         )
 
         # Get uuids for all asset types
