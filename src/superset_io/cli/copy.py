@@ -1,5 +1,6 @@
 import logging
 import shutil
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -11,7 +12,7 @@ from superset_io.api.assets import select_assets
 from superset_io.dependency_graph import AssetsParser
 from superset_io.dependency_graph.assets import AssetData
 from superset_io.dependency_graph.repr import make_console
-from superset_io.utils import sanitize_assets_bundle
+from superset_io.utils import sanitize_assets_bundle, zipfile_buffer_from_folder
 
 log = logging.getLogger("superset_io")
 
@@ -35,31 +36,31 @@ def copy(
     dst_path: Annotated[
         Path,
         typer.Argument(
-            file_okay=False,
+            file_okay=True,
             dir_okay=True,
             exists=False,
-            help="Destination zip or directory.",
+            help="Target zip or directory.",
         ),
     ],
     skip: Annotated[
         list[str] | None,
         typer.Option(
-            help="Specify UUIDs of assets exclude from upload. Can be combined with "
+            help="Specify UUIDs of assets exclude from the copy. Can be combined with "
             "--select and gets applied after selection and dependency resolution.",
         ),
     ] = None,
     select: Annotated[
         list[str] | None,
         typer.Option(
-            help="Specify UUIDs of assets to upload. If not given, "
-            "all assets will be uploaded. Can be given multiple times.",
+            help="Specify UUIDs of assets to copy. If not given, "
+            "all assets will be copied. Can be given multiple times.",
         ),
     ] = None,
     include_dependencies: Annotated[
         bool,
         typer.Option(
             help="Whether to include dependencies of selected assets. "
-            "Only applies if --select is used. Skipped assets will be removed after",
+            "Only applies if --select is used. Skipped assets will be removed after.",
         ),
     ] = True,
     yes: Annotated[
@@ -74,10 +75,12 @@ def copy(
         ),
     ] = False,
 ):
-    """Copy assets from source folder to target folder."""
+    """Copy assets from source folder to target directory."""
 
     # Confirm if destination directory already exists and is not empty
-    if dst_path.exists() and any(dst_path.iterdir()):
+    if dst_path.exists() and (
+        not dst_path.is_dir() or any(dst_path.iterdir())
+    ):
         if not yes and not typer.prompt(
             f"Destination directory '{dst_path}' is not empty. Overwrite?",
             type=bool,
@@ -85,8 +88,10 @@ def copy(
         ):
             typer.echo("Exiting")
             raise typer.Exit(code=1)
-        if dst_path.exists():
+        if dst_path.is_dir():
             shutil.rmtree(dst_path)
+        else:
+            dst_path.unlink()
 
     # Parse and subselect assets
     parser = AssetsParser(src_path)
@@ -122,6 +127,18 @@ def _copy(
     sanitize: bool = False,
 ) -> None:
     """Execute the copy operation to the target folder."""
+
+    # Ziping needs a temporary folder, so we just wrap ourself
+    if target.suffix.lower() == ".zip":
+        with tempfile.TemporaryDirectory() as _tmp_dir:
+            tmp_dir = Path(_tmp_dir) / "assets_export"
+            _copy(assets, source, tmp_dir, sanitize=sanitize)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(
+                zipfile_buffer_from_folder(tmp_dir).getvalue()
+            )
+        return
+
     console = make_console()
     console.print(f"[bold]Copying {len(assets)} assets ...")
     console.print(f"from {str(source.absolute())!r}")
