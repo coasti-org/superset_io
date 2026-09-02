@@ -90,9 +90,7 @@ class TestApiClient:
 
         assert assets_dl.graph == assets_original.graph
 
-    def test_upload_select(
-        self, superset_client: SupersetApiClient, superset_instance
-    ):
+    def test_upload_select(self, superset_client: SupersetApiClient, superset_instance):
         """Test upload of valid assets."""
 
         # Upload folder with select
