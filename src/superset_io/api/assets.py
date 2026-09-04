@@ -158,7 +158,7 @@ class AssetsApiClient(ClientBase):
             dst_path.write_bytes(zip_bytes)
         else:
             # Extract the zip to temp dir, get the assets and move to dst_path.
-            # This is now the only point where we do zip -> folder converstion.
+            # This is now the only point where we do zip -> folder conversion.
             # If we need this elsewhere, move it into a helper!
             with tempfile.TemporaryDirectory() as _tmp_dir:
                 tmp_dir = Path(_tmp_dir)
