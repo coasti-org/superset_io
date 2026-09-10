@@ -11,13 +11,9 @@ import typer
 from dotenv import load_dotenv
 
 from superset_io.api import SupersetApiClient, SupersetApiSession
-from superset_io.utils import (
-    get_version,
-    sanitize_assets_bundle,
-    zipfile_buffer_from_folder,
-)
+from superset_io.utils import get_version
 
-from .copy import copy_app
+from .copy import copy, copy_app
 from .explore import explore_app
 from .utils import catch_exception
 
@@ -183,37 +179,62 @@ def download(
             help="Sanitize downloaded assets (consistent filenames, smaller YAML).",
         ),
     ] = False,
+    select: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="Specify UUIDs of assets to download. Can be given multiple times.",
+        ),
+    ] = None,
+    skip: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="Specify UUIDs of assets to exclude from download. Can be combined "
+            "with --select and gets applied after selection and dependency resolution.",
+        ),
+    ] = None,
+    include_dependencies: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to include dependencies of selected assets. "
+            "Only applies if --select is used.  Skipped assets will be removed after.",
+        ),
+    ] = True,
 ):
     """Download all assets from server to zip or yaml directory."""
 
-    if dst_path.is_dir() and any(dst_path.iterdir()):
+    target_has_content = (dst_path.is_dir() and any(dst_path.iterdir())) or (
+        dst_path.is_file() and dst_path.suffix.lower() == ".zip"
+    )
+    if target_has_content:
         if typer.prompt(
-            f"Destination directory '{dst_path}' is not empty. Delete and re-use?",
+            f"Destination '{dst_path}' is not empty. Delete and re-use?",
             type=bool,
             default=False,
         ):
-            shutil.rmtree(dst_path)
+            if dst_path.is_dir():
+                shutil.rmtree(dst_path)
+            else:
+                dst_path.unlink()
         else:
             log.info("Exiting")
             raise typer.Exit(code=1)
-    if not sanitize:
+
+    needs_modification = sanitize or select is not None or skip is not None
+    if not needs_modification:
         ctx.obj.assets.download(dst_path)
         return
 
-    # We want to keep sanitization out of the api layer. Do it at cli level.
-    with tempfile.TemporaryDirectory() as temporary_directory:
-        temporary_path = Path(temporary_directory) / "assets_export"
-        ctx.obj.assets.download(temporary_path)
-        sanitize_assets_bundle(temporary_path)
-
-        if dst_path.suffix.lower() == ".zip":
-            dst_path.parent.mkdir(parents=True, exist_ok=True)
-            zip_buffer = zipfile_buffer_from_folder(temporary_path)
-            dst_path.write_bytes(zip_buffer.getvalue())
-        else:
-            dst_path.mkdir(parents=True, exist_ok=True)
-            for item in temporary_path.iterdir():
-                shutil.move(item, dst_path / item.name)
+    with tempfile.TemporaryDirectory() as _tmp_dir:
+        tmp_dir = Path(_tmp_dir) / "assets_export"
+        ctx.obj.assets.download(tmp_dir)
+        copy(
+            tmp_dir,
+            dst_path,
+            select=select,
+            skip=skip,
+            include_dependencies=include_dependencies,
+            sanitize=sanitize,
+        )
 
 
 @app.command()
@@ -228,18 +249,18 @@ def upload(
             help="Source zip or directory.",
         ),
     ],
-    skip: Annotated[
-        list[str] | None,
-        typer.Option(
-            help="Specify UUIDs of assets exclude from upload. Can be combined with "
-            "--select and gets applied after selection and dependency resolution.",
-        ),
-    ] = None,
     select: Annotated[
         list[str] | None,
         typer.Option(
             help="Specify UUIDs of assets to upload. If not given, "
             "all assets will be uploaded. Can be given multiple times.",
+        ),
+    ] = None,
+    skip: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="Specify UUIDs of assets exclude from upload. Can be combined with "
+            "--select and gets applied after selection and dependency resolution.",
         ),
     ] = None,
     include_dependencies: Annotated[
@@ -250,16 +271,14 @@ def upload(
             "very end (after resolving dependencies).",
         ),
     ] = True,
-    force: Annotated[
+    yes: Annotated[
         bool,
-        typer.Option(
-            help="Skip confirmation before overwriting remote assets.",
-        ),
+        typer.Option("--yes", "-y", help="Skip confirmation prompt."),
     ] = False,
 ):
     """Upload all assets from zip or yaml directory to server."""
 
-    if not force and not typer.confirm(
+    if not yes and not typer.confirm(
         f"This will overwrite content on {ctx.obj.session.base_url} and "
         "CANNOT BE UNDONE.\nProceed?",
         default=False,
@@ -267,9 +286,21 @@ def upload(
         log.info("Exiting")
         raise typer.Exit(code=1)
 
-    ctx.obj.assets.upload(
-        src_path,
-        selected=select,
-        skip=skip,
-        include_dependencies=include_dependencies,
-    )
+    needs_modification = select is not None or skip is not None
+    if not needs_modification:
+        ctx.obj.assets.upload(src_path)
+        return
+
+    with tempfile.TemporaryDirectory() as _tmp_dir:
+        tmp_dir = Path(_tmp_dir) / "assets_export"
+        copy(
+            src_path,
+            tmp_dir,
+            select=select,
+            skip=skip,
+            include_dependencies=include_dependencies,
+        )
+        ctx.obj.assets.upload(
+            tmp_dir,
+            sparse=needs_modification,
+        )

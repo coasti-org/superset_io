@@ -1,5 +1,9 @@
 import logging
 import shutil
+import tempfile
+import zipfile
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -11,7 +15,12 @@ from superset_io.api.assets import select_assets
 from superset_io.dependency_graph import AssetsParser
 from superset_io.dependency_graph.assets import AssetData
 from superset_io.dependency_graph.repr import make_console
-from superset_io.utils import sanitize_assets_bundle
+from superset_io.utils import (
+    sanitize_assets_bundle,
+    validate_assets_bundle_structure,
+    zipfile_buffer_from_folder,
+    zipfile_buffer_from_zipfile,
+)
 
 log = logging.getLogger("superset_io")
 
@@ -35,36 +44,36 @@ def copy(
     dst_path: Annotated[
         Path,
         typer.Argument(
-            file_okay=False,
+            file_okay=True,
             dir_okay=True,
             exists=False,
-            help="Destination zip or directory.",
+            help="Target zip or directory.",
         ),
     ],
     skip: Annotated[
         list[str] | None,
         typer.Option(
-            help="Specify UUIDs of assets exclude from upload. Can be combined with "
+            help="Specify UUIDs of assets exclude from the copy. Can be combined with "
             "--select and gets applied after selection and dependency resolution.",
         ),
     ] = None,
     select: Annotated[
         list[str] | None,
         typer.Option(
-            help="Specify UUIDs of assets to upload. If not given, "
-            "all assets will be uploaded. Can be given multiple times.",
+            help="Specify UUIDs of assets to copy. If not given, "
+            "all assets will be copied. Can be given multiple times.",
         ),
     ] = None,
     include_dependencies: Annotated[
         bool,
         typer.Option(
             help="Whether to include dependencies of selected assets. "
-            "Only applies if --select is used. Skipped assets will be removed after",
+            "Only applies if --select is used. Skipped assets will be removed after.",
         ),
     ] = True,
     yes: Annotated[
         bool,
-        typer.Option("--yes", "-y", help="Skip confirmation prompt"),
+        typer.Option("--yes", "-y", help="Skip confirmation prompt."),
     ] = False,
     sanitize: Annotated[
         bool,
@@ -74,10 +83,10 @@ def copy(
         ),
     ] = False,
 ):
-    """Copy assets from source folder to target folder."""
+    """Copy assets from source folder to target directory."""
 
     # Confirm if destination directory already exists and is not empty
-    if dst_path.exists() and any(dst_path.iterdir()):
+    if dst_path.exists() and (not dst_path.is_dir() or any(dst_path.iterdir())):
         if not yes and not typer.prompt(
             f"Destination directory '{dst_path}' is not empty. Overwrite?",
             type=bool,
@@ -85,34 +94,64 @@ def copy(
         ):
             typer.echo("Exiting")
             raise typer.Exit(code=1)
-        if dst_path.exists():
+        if dst_path.is_dir():
             shutil.rmtree(dst_path)
+        else:
+            dst_path.unlink()
 
-    # Parse and subselect assets
-    parser = AssetsParser(src_path)
-    parser.parse()
-    graph = parser.graph
-    registry = parser.asset_registry
+    with _source_folder(src_path) as src_folder:
+        parser = AssetsParser(src_folder)
+        parser.parse()
+        graph = parser.graph
+        registry = parser.asset_registry
 
-    all_assets = [*graph.assets]
-    if not all_assets:
-        typer.echo("No assets found. Exiting.", err=True)
-        raise typer.Exit(code=1)
+        all_assets = [*graph.assets]
+        if not all_assets:
+            typer.echo("No assets found. Exiting.", err=True)
+            raise typer.Exit(code=1)
 
-    selected_assets = select_assets(
-        graph,
-        select,
-        skip,
-        include_dependencies,
-    )
+        selected_assets = select_assets(
+            graph,
+            select,
+            skip,
+            include_dependencies,
+        )
+        _copy(
+            [registry[asset] for asset in selected_assets],
+            src_folder,
+            dst_path,
+            sanitize=sanitize,
+        )
 
-    # Perform the copy
-    _copy(
-        [registry[asset] for asset in selected_assets],
-        src_path,
-        dst_path,
-        sanitize=sanitize,
-    )
+
+@contextmanager
+def _source_folder(src_path: Path) -> Generator[Path]:
+    """Yield a directory containing an assets bundle, extracting ZIP sources."""
+
+    if src_path.is_dir():
+        yield src_path
+        return
+
+    if src_path.suffix.lower() != ".zip":
+        raise ValueError(f"Source must be an assets directory or ZIP file: {src_path}")
+
+    zip_buffer = zipfile_buffer_from_zipfile(src_path)
+    validate_assets_bundle_structure(zip_buffer)
+
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        extraction_directory = Path(temporary_directory)
+        with zipfile.ZipFile(zip_buffer) as zip_file:
+            zip_file.extractall(extraction_directory)
+
+        source_folders = [
+            path for path in extraction_directory.iterdir() if path.is_dir()
+        ]
+        if len(source_folders) != 1:
+            raise ValueError(
+                "Expected exactly one top-level folder in source assets ZIP."
+            )
+
+        yield source_folders[0]
 
 
 def _copy(
@@ -122,6 +161,18 @@ def _copy(
     sanitize: bool = False,
 ) -> None:
     """Execute the copy operation to the target folder."""
+
+    source = source.resolve()
+
+    # Ziping needs a temporary folder, so we just wrap ourself
+    if target.suffix.lower() == ".zip":
+        with tempfile.TemporaryDirectory() as _tmp_dir:
+            tmp_dir = Path(_tmp_dir) / "assets_export"
+            _copy(assets, source, tmp_dir, sanitize=sanitize)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(zipfile_buffer_from_folder(tmp_dir).getvalue())
+        return
+
     console = make_console()
     console.print(f"[bold]Copying {len(assets)} assets ...")
     console.print(f"from {str(source.absolute())!r}")
@@ -180,3 +231,9 @@ def _copy_metdata(source: Path, target: Path):
             yaml.dump(metadata_content, f)
     except OSError as e:
         raise OSError(f"Failed to write metadata.yaml to '{metadata_dst}': {e}") from e
+
+    # # Preserve bundle-level YAML files such as tags.yaml that are not assets.
+    for root_level_yaml in source.glob("*.yaml"):
+        if root_level_yaml.name == "metadata.yaml":
+            continue
+        shutil.copy2(root_level_yaml, target / root_level_yaml.name)

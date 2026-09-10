@@ -12,7 +12,18 @@ TLDR:
 
 We keep track of the superset version (first part) and our wrapping for coasti (second part, pre-release notation)
 
+## Upcoming
 
+### Fixed
+
+- `copy` now supports ZIP sources and targets.
+
+### Changed
+
+- Renamed the CLI `--force` option to `--yes` in `upload` to be consistent with `copy`.
+- Asset sanitzation, selection, skipping, and dependency handling now run through the CLI
+  layer for `upload` and `download`; the API layer handles complete asset bundles.
+  This keeps all asset modifcation logic self-contained in the copy module.
 
 ## 0.2.0 - 2026-09-01
 
