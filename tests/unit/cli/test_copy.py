@@ -140,10 +140,7 @@ def test_copy_sanitizes_directory_output(tmp_path: Path) -> None:
         destination / "databases" / "00000000-da7a-ba5e-0000-000000000000.yaml"
     ).exists()
     assert (
-        destination
-        / "datasets"
-        / "SQLite"
-        / "00000000-da7a-5e70-0000-000000000000.yaml"
+        destination / "datasets" / "00000000-da7a-5e70-0000-000000000000.yaml"
     ).exists()
 
 
@@ -165,8 +162,5 @@ def test_copy_sanitizes_zip_output(tmp_path: Path) -> None:
     assert "assets_export/charts/Age_1.yaml" not in names
     assert "assets_export/dashboards/00000000-0000-0000-0000-da54b0aad000.yaml" in names
     assert "assets_export/databases/00000000-da7a-ba5e-0000-000000000000.yaml" in names
-    assert (
-        "assets_export/datasets/SQLite/00000000-da7a-5e70-0000-000000000000.yaml"
-        in names
-    )
+    assert "assets_export/datasets/00000000-da7a-5e70-0000-000000000000.yaml" in names
     assert "query_context:" not in sanitized_chart

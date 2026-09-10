@@ -196,9 +196,13 @@ def download(
         bool,
         typer.Option(
             help="Whether to include dependencies of selected assets. "
-            "Only applies if --select is used.  Skipped assets will be removed after.",
+            "Only applies if --select is used. Skipped assets will be removed after.",
         ),
     ] = True,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip confirmation prompt."),
+    ] = False,
 ):
     """Download all assets from server to zip or yaml directory."""
 
@@ -206,11 +210,12 @@ def download(
         dst_path.is_file() and dst_path.suffix.lower() == ".zip"
     )
     if target_has_content:
-        if typer.prompt(
+        if yes or typer.prompt(
             f"Destination '{dst_path}' is not empty. Delete and re-use?",
             type=bool,
             default=False,
         ):
+            log.debug(f"Deleting existing content at '{dst_path}'")
             if dst_path.is_dir():
                 shutil.rmtree(dst_path)
             else:
