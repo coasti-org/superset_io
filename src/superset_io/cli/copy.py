@@ -231,3 +231,9 @@ def _copy_metdata(source: Path, target: Path):
             yaml.dump(metadata_content, f)
     except OSError as e:
         raise OSError(f"Failed to write metadata.yaml to '{metadata_dst}': {e}") from e
+
+    # # Preserve bundle-level YAML files such as tags.yaml that are not assets.
+    for root_level_yaml in source.glob("*.yaml"):
+        if root_level_yaml.name == "metadata.yaml":
+            continue
+        shutil.copy2(root_level_yaml, target / root_level_yaml.name)

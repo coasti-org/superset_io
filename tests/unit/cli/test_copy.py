@@ -77,7 +77,11 @@ def test_full_copy_preserves_tags_yaml(tmp_path: Path) -> None:
     source = tmp_path / "source"
     shutil.copytree(SAMPLE_ASSETS, source)
     tags_content = "tags:\n- tag_name: Test\n  description: asdsadas\n"
-    (source / "tags.yaml").write_text(tags_content, encoding="utf-8")
+    (source / "tags.yaml").write_text(
+        tags_content,
+        encoding="utf-8",
+        newline="\n",  # avoid windows converting to crlf
+    )
 
     # Directory target
     destination_dir = tmp_path / "copied"
