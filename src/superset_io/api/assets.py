@@ -6,10 +6,11 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from superset_io.dependency_graph import Asset, AssetsParser, DependencyGraph
+from superset_io.dependency_graph import Asset, DependencyGraph
 from superset_io.utils import (
     validate_assets_bundle_structure,
     zipfile_buffer_from_folder,
+    zipfile_buffer_from_zipfile,
 )
 
 from .abc import ClientBase
@@ -95,9 +96,6 @@ class AssetsApiClient(ClientBase):
     def upload(
         self,
         src_path: Path,
-        selected: list[str] | None = None,
-        skip: list[str] | None = None,
-        include_dependencies: bool = False,
         overwrite: bool = True,
         sparse: bool = False,
     ):
@@ -106,15 +104,12 @@ class AssetsApiClient(ClientBase):
         Args:
             src_path: Path to a zip file or directory containing assets.
                 If directory, must directly contain the metadata.yaml file.
-            select: Optional list of asset uuids to upload. If provided, only
-                these assets (and optionally their dependencies) will be uploaded.
-            skip: Optional list of asset uuids to _not_ upload. Overrules assets found
-                via ``select`` and ``include_dependencies``.
-            include_dependencies: If True, automatically include all dependencies
-                of the selected assets. If False (default), only the explicitly
-                selected assets are uploaded, which may result in broken references.
+                If zip file, expects the format you get from superset:
+                Exactly one contained top-level folder that holds the metadata.yaml.
             overwrite: If True (default), overwrite existing assets on the server.
                 If False, skip assets that already exist.
+            sparse: Needs to be set to true when only a subset of assets is selected.
+                This will tell the superset api to skip dependency checks.
 
         Raises:
             ValueError: If a selected asset is not found in the bundle.
@@ -124,89 +119,14 @@ class AssetsApiClient(ClientBase):
             is automatically enabled regardless of this parameter, since only
             a subset of assets is being uploaded.
         """
-        src_path = Path(src_path)
 
-        # Extract zip to temp dir if needed - so parser can work on it
-        if src_path.suffix.lower() == ".zip":
-            with tempfile.TemporaryDirectory() as tmpdir:
-                with zipfile.ZipFile(src_path, "r") as zf:
-                    zf.extractall(tmpdir)
-                # Find the extracted folder (zip may contain a subfolder)
-                extracted = Path(tmpdir)
-                contents = list(extracted.iterdir())
-                if len(contents) == 1 and contents[0].is_dir():
-                    extracted = contents[0]
-
-                src_path = extracted
-                return self._upload_from_folder(
-                    src_path,
-                    selected,
-                    skip,
-                    include_dependencies,
-                    overwrite,
-                    sparse,
-                )
-
-        return self._upload_from_folder(
-            src_path,
-            selected,
-            skip,
-            include_dependencies,
-            overwrite,
-            sparse,
-        )
-
-    def _upload_from_folder(
-        self,
-        src_path: Path,
-        selected: list[str] | None = None,
-        skip: list[str] | None = None,
-        include_dependencies: bool = False,
-        overwrite: bool = True,
-        sparse: bool = False,
-    ):
-        """Upload and restore assets from disk.
-
-        src_path needs to be a directory directly containing the metadata.yml.
-        """
-        parser = AssetsParser(src_path)
-        parser.parse()
-        graph = parser.graph
-        registry = parser.asset_registry
-        zipfile_buffer = None
-
-        # only create a temporary folder if not uploading everything.
-        if selected is not None or skip is not None:
-            selected_assets = select_assets(
-                graph,
-                selected,
-                skip,
-                include_dependencies,
-            )
-            sparse = True  # Always use sparse when selecting assets
-
-            # Extract selected assets to temp dir
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmppath = Path(tmpdir)
-                shutil.copyfile(
-                    parser.folder / "metadata.yaml", tmppath / "metadata.yaml"
-                )
-                for asset in selected_assets:
-                    asset_data = registry[asset]
-                    if asset_data.file_path is not None:
-                        dst_file = tmppath / asset_data.file_path.relative_to(
-                            parser.folder
-                        )
-                        dst_file.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copyfile(asset_data.file_path, dst_file)
-
-                zipfile_buffer = zipfile_buffer_from_folder(tmppath)
-
-        # Create zip buffer from src_path
-        if zipfile_buffer is None:
+        if src_path.is_dir():
             zipfile_buffer = zipfile_buffer_from_folder(src_path)
+        else:
+            zipfile_buffer = zipfile_buffer_from_zipfile(src_path)
 
         validate_assets_bundle_structure(zipfile_buffer)
+
         self._import(
             zipfile_buffer=zipfile_buffer,
             sparse=sparse,
@@ -229,23 +149,24 @@ class AssetsApiClient(ClientBase):
         if kind == "folder" and any(dst_path.iterdir()):
             raise ValueError(f"Destination directory '{dst_path}' is not empty")
 
-        res = self._export()
-
         # if the zip gets big we might need to consider streaming
+        res = self._export()
         zip_bytes = res.content
 
         if kind == "zip":
             dst_path.parent.mkdir(parents=True, exist_ok=True)
             dst_path.write_bytes(zip_bytes)
         else:
-            # Extract to temp dir, get the assets and move to dst_path
-            with tempfile.TemporaryDirectory() as _tmp_path:
-                tmp_path = Path(_tmp_path)
+            # Extract the zip to temp dir, get the assets and move to dst_path.
+            # This is now the only point where we do zip -> folder conversion.
+            # If we need this elsewhere, move it into a helper!
+            with tempfile.TemporaryDirectory() as _tmp_dir:
+                tmp_dir = Path(_tmp_dir)
                 zip_file = zipfile.ZipFile(io.BytesIO(zip_bytes), "r")
-                zip_file.extractall(tmp_path)
+                zip_file.extractall(tmp_dir)
 
                 src_folders = [
-                    f for f in tmp_path.iterdir() if f.name.startswith("assets_export")
+                    f for f in tmp_dir.iterdir() if f.name.startswith("assets_export")
                 ]
                 if len(src_folders) != 1:
                     raise ValueError(
