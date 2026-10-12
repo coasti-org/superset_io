@@ -12,7 +12,11 @@ TLDR:
 
 We keep track of the superset version (first part) and our wrapping for coasti (second part, pre-release notation)
 
-## Upcoming
+## 0.3.0 - 2026-10-12
+
+### New
+
+- `upload` and `download` commands now support asset selection (options `--select`, `--skip`, `--include-dependencies`)
 
 ### Fixed
 
@@ -23,6 +27,9 @@ We keep track of the superset version (first part) and our wrapping for coasti (
 
 - Sanitization: Now converts line breaks from CRLF to LF. This avoids inconsistent diffs when running superset-io on windows. If you edit the yaml files on windows, also set your editor to use LF to avoid inconsistencies.
 - Renamed the CLI `--force` option to `--yes` in `upload` to be consistent with `copy`.
+
+### Dev Notes
+
 - Asset sanitzation, selection, skipping, and dependency handling now run through the CLI
   layer for `upload` and `download`; the API layer handles complete asset bundles.
   This keeps all asset modifcation logic self-contained in the copy module.
