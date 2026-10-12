@@ -8,7 +8,9 @@ from importlib import metadata
 from pathlib import Path
 
 import pytest
+from ruamel.yaml import YAML
 
+import superset_io.utils as utils
 from superset_io.utils import (
     get_version,
     sanitize_assets_bundle,
@@ -300,6 +302,34 @@ class TestSanitizeAssetsBundle:
         assert "query_context:" not in chart_content
         assert "slice_name: Area" in chart_content
         assert "uuid: 44444444-aaaa-4bbb-cccc-111111111111" in chart_content
+
+    def test_normalizes_line_endings_to_lf(self, tmp_path, monkeypatch):
+        """Sanitized assets should use LF line endings even with CRLF YAML output."""
+        folder = self._make_folder(
+            tmp_path,
+            {
+                "dashboards/demo.yaml": (
+                    "dashboard_title: Demo\n"
+                    "uuid: 55555555-aaaa-4bbb-cccc-222222222222\n"
+                ),
+            },
+        )
+
+        def create_crlf_yaml():
+            yaml = YAML()
+            yaml.line_break = "\r\n"  # type: ignore
+            return yaml
+
+        monkeypatch.setattr(utils, "YAML", create_crlf_yaml)
+
+        sanitize_assets_bundle(folder)
+
+        output_file = (
+            folder / "dashboards" / "55555555-aaaa-4bbb-cccc-222222222222.yaml"
+        )
+        output_content = output_file.read_bytes()
+        assert b"\r" not in output_content
+        assert b"\n" in output_content
 
     def test_leaves_non_asset_subfolders_untouched(self, tmp_path):
         """Files outside charts/dashboards/datasets/databases are skipped."""
